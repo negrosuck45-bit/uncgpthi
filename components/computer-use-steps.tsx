@@ -1,145 +1,130 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { ChevronDown, CheckCircle2, AlertCircle, Loader } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, Terminal, FileText, Globe, Search, Github, Wrench, Copy, Check, Loader2 } from 'lucide-react';
 
 export interface ComputerUseStep {
   iteration: number;
-  action: "think" | "tool_use" | "complete";
+  action: string;
   tool?: string;
-  input?: Record<string, any>;
+  input?: any;
   result?: string;
-  reasoning?: string;
+  error?: string;
 }
 
-interface ComputerUseStepsProps {
+interface Props {
   steps: ComputerUseStep[];
   isRunning?: boolean;
   compact?: boolean;
 }
 
-export function ComputerUseSteps({
-  steps,
-  isRunning = false,
-  compact = false,
-}: ComputerUseStepsProps) {
-  const [isExpanded, setIsExpanded] = useState(!compact);
+// Map tool name → icon + accent color
+function toolMeta(name: string): { icon: any; label: string; accent: string; bg: string } {
+  const n = (name || '').toLowerCase();
+  if (n.includes('terminal') || n === 'bash' || n === 'shell') return { icon: Terminal, label: 'terminal', accent: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30' };
+  if (n.includes('file_read') || n.includes('file_write') || n.includes('file_edit')) return { icon: FileText, label: 'file', accent: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/30' };
+  if (n.includes('browser') || n.includes('fetch_page')) return { icon: Globe, label: 'browser', accent: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/30' };
+  if (n.includes('web_search') || n.includes('search')) return { icon: Search, label: 'search', accent: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/30' };
+  if (n.includes('github')) return { icon: Github, label: 'github', accent: 'text-zinc-200', bg: 'bg-zinc-700/30 border-zinc-600/40' };
+  return { icon: Wrench, label: 'tool', accent: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' };
+}
 
-  if (steps.length === 0) return null;
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setDone(true);
+        setTimeout(() => setDone(false), 1200);
+      }}
+      className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/5 transition"
+      data-testid="tool-copy-button"
+    >
+      {done ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {done ? 'copied' : 'copy'}
+    </button>
+  );
+}
 
-  const completedSteps = steps.filter((s) => s.action !== "complete");
-  const finalStep = steps.find((s) => s.action === "complete");
+function ToolBlock({ step, isRunning }: { step: ComputerUseStep; isRunning: boolean }) {
+  const [open, setOpen] = useState(true);
+  const meta = toolMeta(step.tool || step.action || '');
+  const Icon = meta.icon;
+  const command = step.input?.command || step.input?.path || step.input?.url || step.input?.query || step.input?.name || '';
+  const result = step.result || step.error || '';
+  const isTerminal = (step.tool || '').toLowerCase().includes('terminal');
 
   return (
-    <div className="my-3 border-l-2 border-blue-500/30 pl-4 ml-4">
-      {/* Header - Collapsible */}
+    <div className={`rounded-xl overflow-hidden border ${meta.bg} my-2`} data-testid={`tool-block-${step.tool}`}>
+      {/* Header — like Kimi/Claude tool card */}
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className={cn(
-          "flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:opacity-80 transition-opacity",
-          compact && "cursor-pointer"
-        )}
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition"
+        data-testid="tool-block-toggle"
       >
-        <div className="flex items-center gap-2">
-          {isRunning ? (
-            <Loader className="h-4 w-4 animate-spin" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4" />
-          )}
-          <span>
-            🖥️ Computer Agent • {completedSteps.length} step
-            {completedSteps.length !== 1 ? "s" : ""}
-            {isRunning && " • Running..."}
+        {open ? <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
+        <Icon className={`w-3.5 h-3.5 shrink-0 ${meta.accent}`} />
+        <span className={`text-xs font-mono font-medium ${meta.accent}`}>{step.tool || meta.label}</span>
+        {command && (
+          <span className="text-xs font-mono text-zinc-400 truncate flex-1">
+            {typeof command === 'string' ? command : JSON.stringify(command)}
           </span>
-        </div>
-        {compact && (
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 transition-transform",
-              isExpanded && "rotate-180"
-            )}
-          />
+        )}
+        {isRunning ? (
+          <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0" />
+        ) : (
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 shrink-0">done</span>
         )}
       </button>
 
-      {/* Steps List - Collapsible */}
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-3 space-y-2 overflow-hidden"
-          >
-            {completedSteps.map((step, idx) => (
-              <div key={idx} className="text-xs space-y-1">
-                <div className="flex items-start gap-2 p-2 rounded bg-blue-50 dark:bg-blue-950/20">
-                  {step.action === "tool_use" ? (
-                    <>
-                      <div className="flex-shrink-0 mt-0.5">
-                        <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                          {idx + 1}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-mono text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-2">
-                          <span className="inline-block px-1.5 py-0.5 rounded bg-blue-500/15 text-[10px] uppercase tracking-wider">tool</span>
-                          {step.tool}
-                        </div>
-                        {step.input && Object.keys(step.input).length > 0 && (
-                          <div className="text-[11px] text-gray-600 dark:text-gray-400 mt-1.5 max-h-32 overflow-y-auto rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2">
-                            <pre className="whitespace-pre-wrap break-words font-mono">
+      {open && (
+        <div className="border-t border-white/5">
+          {/* Input args (skip if just one trivial arg already shown in header) */}
+          {step.input && Object.keys(step.input).length > 1 && (
+            <div className="px-3 py-2 border-b border-white/5">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">args</div>
+              <pre className="text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-words leading-relaxed">
 {JSON.stringify(step.input, null, 2)}
-                            </pre>
-                          </div>
-                        )}
-                        {step.result && (
-                          <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-1.5 max-h-48 overflow-y-auto rounded bg-zinc-950 text-zinc-100 dark:bg-black p-2 border border-zinc-800 font-mono">
-                            <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">output</div>
-                            <pre className="whitespace-pre-wrap break-words">
-{step.result.slice(0, 1500)}
-{step.result.length > 1500 && "\n…(truncated)"}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex-shrink-0 mt-0.5">
-                        <div className="h-5 w-5 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-white text-xs font-bold">
-                          {idx + 1}
-                        </div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-gray-700 dark:text-gray-300">
-                          {step.reasoning || "Thinking..."}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
+              </pre>
+            </div>
+          )}
 
-            {finalStep && (
-              <div className="text-xs p-2 rounded bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900">
-                <div className="flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 text-green-700 dark:text-green-300">
-                    <div className="font-semibold">Complete</div>
-                    <div className="mt-1">{finalStep.reasoning}</div>
-                  </div>
+          {/* Output / Result — terminal-style block */}
+          {result && (
+            <div className={isTerminal ? 'bg-black' : 'bg-zinc-950'}>
+              <div className="flex items-center justify-between px-3 py-1 border-b border-white/5">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  {isTerminal ? '$ output' : 'result'}
                 </div>
+                <CopyButton text={result} />
               </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <pre className={`text-[11.5px] font-mono whitespace-pre-wrap break-words leading-relaxed px-3 py-2 max-h-80 overflow-y-auto ${
+                isTerminal ? 'text-emerald-300' : 'text-zinc-200'
+              }`}>
+{result.slice(0, 4000)}
+{result.length > 4000 && `\n\n… (${result.length - 4000} more chars truncated)`}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-export default ComputerUseSteps;
+export function ComputerUseSteps({ steps, isRunning = false, compact = false }: Props) {
+  if (!steps || steps.length === 0) return null;
+  const toolSteps = steps.filter((s) => s.action === 'tool_use' || s.tool);
+
+  if (toolSteps.length === 0) return null;
+
+  return (
+    <div className="my-2 space-y-1" data-testid="computer-use-steps">
+      {toolSteps.map((step, i) => (
+        <ToolBlock key={`${step.iteration}-${i}`} step={step} isRunning={isRunning && i === toolSteps.length - 1} />
+      ))}
+    </div>
+  );
+}

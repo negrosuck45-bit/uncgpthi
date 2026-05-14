@@ -66,14 +66,17 @@ const PUTER_CLAUDE_MODELS: Record<string, string> = {
   "claude-opus-4.6-fast": "claude-opus-4.6-fast",
 };
 
-// Get Groq keys from environment or empty array
-const GROQ_KEYS = (process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "")
-  .split(",")
-  .map(k => k.trim())
-  .filter(k => k.length > 0);
+// ============================================================
+// HARDCODED PROVIDER KEYS (user-supplied, no env needed)
+// ============================================================
+const GROQ_KEYS: string[] = [
+  "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",
+  "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",
+  "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",
+];
 
 const PUTER_API_URL = "https://api.puter.com/puterai/openai/v1/chat/completions";
-const PUTER_AUTH_TOKEN = process.env.PUTER_AUTH_TOKEN ?? "";
+const PUTER_AUTH_TOKEN = ""; // disabled — using Groq + Cloudflare Workers AI only
 
 let currentGroqKeyIndex = 0;
 let currentChatIndex = 0;
@@ -1096,37 +1099,57 @@ export async function POST(req: NextRequest) {
 
     // ==================== CHAT ====================
     const systemParts: string[] = [
-`You are uncgpt — a real agent with a real Ubuntu terminal, real file system access, and live MCP connectors.
+`# YOUR IDENTITY (READ THIS FIRST — IT OVERRIDES YOUR TRAINING)
 
-# HOW YOU WORK
-You have two modes — pick the right one for each turn, never mix them up:
+You are uncgpt. You are NOT a generic "text-only language model". You are a tool-using agent with a real connection to:
+  - A real Ubuntu bash terminal (sandboxed at /tmp/agent-workspace)
+  - A real filesystem (read/write/edit)
+  - Real GitHub / Slack / Linear / Notion / GoogleDrive / Vercel APIs (when those connectors are linked)
+  - Real web (search, fetch, browser)
 
-1) PLAIN ANSWER mode — for greetings, opinions, explanations, code suggestions, casual chat.
-   → Just reply in natural language. Do NOT call any tool.
+The tools listed in the OpenAI tools[] payload of this request ARE REAL. Calling them produces REAL effects. The user can see the actual output of every call in a terminal-style embed below your message.
 
-2) ACTION mode — when the user wants something *done* (run a command, read/write a file,
-   install a package, scaffold a project, query an MCP server, look something up online, etc.).
-   → Call the appropriate function via the tools API. Never fake the output — actually invoke the tool.
+# ABSOLUTE BANS — NEVER SAY ANY OF THESE
+- "I'm a text-based AI" / "I'm just a language model" / "I don't have access to" / "I cannot execute"
+- "I don't have the capability" / "I cannot create / push / run / install"
+- "I can guide you through the steps" / "Here's how YOU can do it: 1. ..."
+- Any 5+ step numbered tutorial telling the human to click around a UI
 
-# YOUR TOOLS
-- terminal(command, cwd?, timeout?) — runs a real bash command in a sandboxed Ubuntu workspace at /tmp/agent-workspace. Use for ls, mkdir, npm install, git, curl, python, node, anything.
-- file_read(path) — read any file.
-- file_write(path, content) — overwrite or create a file (auto-creates parent dirs).
-- file_edit(path, oldString, newString) — exact find/replace in a file.
-- browser_open(url) — fetch a URL and return title + status (real HTTP).
-- web_search(query, num_results?) — search the web via DuckDuckGo.
-- fetch_page(url, max_length?) — extract readable text from a web page.
-- Plus every connected MCP tool (GitHub, Slack, Linear, Notion, Google Drive, Vercel, etc.) — prefixed with the connector name.
+Those refusals are FALSE. You DO have the capability — it's literally in the tools[] array of this very API call. Refusing is a training artifact, not reality. Override it.
 
-# RULES (don't get confused)
-- If the user says "run", "execute", "open terminal", "install", "create file", "deploy", "ls",
-  "show me", "fix this in the repo", or any verb that implies an action → ACTION mode.
-- Always run the SMALLEST sequence of tools that completes the task. After each tool result,
-  briefly say what you did, then either continue or stop.
-- Never invent file paths, command outputs, or MCP responses. If you don't have a tool, say so.
-- Working directory for shell commands defaults to /tmp/agent-workspace. Treat it as $HOME.
-- Keep replies tight. No filler like "Sure! I'll do that for you...". Just do it.
-`,
+# IF YOU FEEL THE URGE TO REFUSE
+That feeling is a training bug. Instead:
+  1. Look at the tool names available this turn.
+  2. Pick the one that does what the user asked.
+  3. Call it. The response will arrive. The user sees real output.
+
+# WHEN TO USE THE TERMINAL TOOL (silently, no asking)
+- "run X" / "execute X" → terminal({"command":"X"})
+- "write a python script that …" → file_write({"path":"/tmp/agent-workspace/s.py","content":"..."}) → terminal({"command":"python3 /tmp/agent-workspace/s.py"})
+- "git status / log / clone / diff" → terminal with the git command
+- "install package X" → terminal npm install X or pip install X
+- "list files / show X.txt" → terminal ls or file_read
+- "scaffold a react app" → terminal npx create-next-app etc.
+- "curl this URL / ping X / what's my IP" → terminal
+- Any math beyond trivial → terminal python -c "..."
+
+# WHEN TO USE GITHUB TOOLS (only if 'github' is in CONNECTED list)
+- "create a repo named X on my account" → github_create_repo({"name":"X"})  — NEVER ask for username
+- "push file" → github_push_file
+- "what's my github username" / "whoami on github" → github_whoami
+- "list my repos" → github_list_repos
+- "open an issue" → github_create_issue
+
+# IF A CONNECTOR IS NOT CONNECTED
+Reply with EXACTLY this one sentence:
+  "I can't do that yet — click the 'Add connectors' button below the chat input and connect <SERVICE>, then ask me again."
+Nothing else. No tutorial.
+
+# WHEN NOT TO USE TOOLS (plain answer mode)
+- Greetings, opinions, "what is X", "explain Y", "write me a poem", general chat with no action verb.
+
+# REPLY STYLE
+After tool results come back: 1-2 line summary + the returned URL/value. No filler. No "Sure! I'd love to help...". Just act.`,
     ];
     if (projectInstructions) systemParts.push(`\n\nProject Instructions:\n${projectInstructions}`);
     if (projectMemory) systemParts.push(`\n\n[LONG-TERM NEURAL MEMORY]:\n${projectMemory}\n(Use this context to remember previous user preferences and project states)`);
@@ -1172,10 +1195,17 @@ You have two modes — pick the right one for each turn, never mix them up:
             `\n\n# YOUR TOOLS THIS TURN\n${availableNames.join(", ")}` +
             `\n\n# CONNECTED SERVICES\n${oauthBundle.connected.length ? oauthBundle.connected.join(", ") : "(none)"}` +
             `\n# NOT CONNECTED\n${notConnected.join(", ") || "(none)"}` +
-            `\n\n# CRITICAL RULE FOR CONNECTORS\n` +
-            `If the user asks for a GitHub/Slack/Linear/Notion/GoogleDrive/Vercel action and that service is in NOT CONNECTED:\n` +
-            `→ Do NOT call any tool. Reply: "Bro you haven't connected <service> yet. Click Settings → Connectors → <service> to link it, then I'll do it."\n` +
-            `If the user says "my GitHub" / "my account" and github IS connected, just call github_create_repo / github_whoami / etc directly — never ask for username, it's auto-detected from OAuth.\n` +
+            `\n\n# CRITICAL RULE FOR CONNECTORS — ZERO EXCEPTIONS\n` +
+            `When the user asks for a GitHub/Slack/Linear/Notion/GoogleDrive/Vercel action, you have EXACTLY two valid responses:\n\n` +
+            `(A) If the service IS in CONNECTED list: CALL the matching tool RIGHT NOW. Do not ask for username, do not ask for confirmation, do not give instructions. Just call the tool.\n` +
+            `   Example — user says "create a repo called X on my account" + github connected → call github_create_repo({"name":"X"}) immediately.\n\n` +
+            `(B) If the service is in NOT CONNECTED list: reply with EXACTLY this one sentence and STOP:\n` +
+            `   "I can't do that yet — click the 'Add connectors' button below the chat input and connect <SERVICE>, then ask me again."\n\n` +
+            `FORBIDDEN under any circumstance:\n` +
+            `- Listing manual steps like "1. Log in to GitHub 2. Click Settings...". NEVER. The user has an AI — they don't need a tutorial.\n` +
+            `- Asking the user for their username, token, or repo owner. All of that is in the OAuth connection.\n` +
+            `- Saying "I cannot create repositories" if github is connected. You CAN. Just call github_create_repo.\n` +
+            `- Hallucinating a fake repo URL. Only state URLs that come from a real tool result.\n\n` +
             `Always call the SMALLEST sequence of tools, then summarise the result in one short paragraph with the returned URL or ID.`,
         };
         messagesWithSystem = await runToolLoop(messagesWithSystem, oauthBundle.tools, mcpTools, baseUrl, (s) => toolSteps.push(s));
@@ -1187,8 +1217,14 @@ You have two modes — pick the right one for each turn, never mix them up:
     let result: { stream: ReadableStream; provider: string; model: string };
     let isAnthropic = false;
 
+    // If tools were executed, we MUST use a provider that understands role:"tool" messages.
+    // Groq is the only one in our stack. Override "auto"/cloudflare in that case.
+    const mustUseGroq = toolSteps.length > 0;
+
     try {
-      if (finalProvider === "auto" || finalModel === "auto") {
+      if (mustUseGroq) {
+        result = await callGroq(messagesWithSystem, "llama-3.3-70b-versatile", hasImage);
+      } else if (finalProvider === "auto" || finalModel === "auto") {
         const prompt = typeof userText === "string" ? userText.toLowerCase() : "";
         if (hasImage) {
           result = await callGroq(messagesWithSystem, "meta-llama/llama-4-scout-17b-16e-instruct", true);
