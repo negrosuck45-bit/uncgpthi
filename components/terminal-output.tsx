@@ -128,7 +128,7 @@ function highlightCode(code: string, language: string): string {
 
   // Numbers
   highlighted = highlighted.replace(
-    /(\d+\.?\d*)/g,
+    /\b(\d+\.?\d*)\b/g,
     `<span style="color:${colors.number}">$1</span>`
   );
 
@@ -151,8 +151,7 @@ function highlightCode(code: string, language: string): string {
 }
 
 function formatOutput(output: string, language: string): React.ReactNode {
-  const lines = output.split("
-");
+  const lines = output.split("\n");
 
   return lines.map((line, i) => {
     if (line.includes("Error") || line.includes("ERROR") || line.includes("Traceback") || line.includes("exception")) {
@@ -328,8 +327,7 @@ export default function TerminalOutput({
 
       <div className="px-4 py-1.5 bg-gray-900 border-t border-gray-700 flex justify-between items-center">
         <span className="text-xs text-gray-600">
-          {output.split("
-").length} lines • {output.length} chars
+          {output.split("\n").length} lines • {output.length} chars
         </span>
         <span className="text-xs text-gray-600">
           {language === "python" ? "🐍 Python 3.11" : language === "javascript" ? "⚡ Node.js 20" : "💻 Bash"}
