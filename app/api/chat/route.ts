@@ -1217,7 +1217,7 @@ Nothing else. No tutorial.
 - Greetings, opinions, "what is X", "explain Y", "write me a poem", general chat with no action verb.
 
 # REPLY STYLE
-After tool results come back: 1-2 line summary + the returned URL/value. No filler. No "Sure! I'd love to help...". Just act.`,
+After tool results come back: 1-2 line summary + the returned URL/value. No filler. No "Sure! I'd love to help...". Just act.you can talk too`,
     ];
     if (projectInstructions) systemParts.push(`\n\nProject Instructions:\n${projectInstructions}`);
     if (projectMemory) systemParts.push(`\n\n[LONG-TERM NEURAL MEMORY]:\n${projectMemory}\n(Use this context to remember previous user preferences and project states)`);
