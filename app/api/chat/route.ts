@@ -747,28 +747,44 @@ async function callGroq(
 ): Promise<{ stream: ReadableStream; provider: string; model: string }> {
   const groqModel = GROQ_CHAT_MODELS[model] ?? (hasImage ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile");
 
+  // Import tools
+  const { AVAILABLE_TOOLS } = await import("@/lib/tools-for-models");
 
   for (let attempt = 0; attempt < GROQ_KEYS.length; attempt++) {
     const key = GROQ_KEYS[(currentGroqKeyIndex + attempt) % GROQ_KEYS.length];
     try {
+      const requestBody: any = {
+        model: groqModel,
+        messages: [
+          { role: "system", content: `You are a helpful AI assistant. Be conversational, thoughtful, and concise. Provide accurate, well-reasoned responses. When the user asks about your identity, respond naturally without over-explaining technical details.` },
+          ...messages,
+        ],
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 4096,
+      };
+
+      // Add tools if available
+      if (AVAILABLE_TOOLS && AVAILABLE_TOOLS.length > 0) {
+        requestBody.tools = AVAILABLE_TOOLS.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema,
+          },
+        }));
+      }
+
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model: groqModel,
-          messages: [
-            { role: "system", content: `You are a helpful AI assistant. Be conversational, thoughtful, and concise. Provide accurate, well-reasoned responses. When the user asks about your identity, respond naturally without over-explaining technical details.` },
-            ...messages,
-          ],
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 4096,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (res.ok) {
         currentGroqKeyIndex = (currentGroqKeyIndex + 1) % GROQ_KEYS.length;
-        return { stream: res.body!, provider: "Groq", model: groqModel };
+        return { stream: res.body!, provider: "Groq (w/ tools)", model: groqModel };
       }
 
       const errText = await res.text().catch(() => "");
@@ -830,6 +846,8 @@ async function callChatWorkers(
 ): Promise<{ stream: ReadableStream; provider: string; model: string }> {
   const cfModel = model.startsWith("@cf/") ? model : "@cf/anthropic/claude-3-haiku";
 
+  // Import tools
+  const { AVAILABLE_TOOLS } = await import("@/lib/tools-for-models");
 
   for (let i = 0; i < CHAT_WORKER_URLS.length; i++) {
     const index = (currentChatIndex + i) % CHAT_WORKER_URLS.length;
@@ -845,20 +863,34 @@ async function callChatWorkers(
           : m.content
       }));
 
+      const requestBody: any = {
+        ...body,
+        model: cfModel,
+        messages: simplifiedMessages
+      };
+
+      // Add tools if available
+      if (AVAILABLE_TOOLS && AVAILABLE_TOOLS.length > 0) {
+        requestBody.tools = AVAILABLE_TOOLS.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema,
+          },
+        }));
+      }
+
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...body,
-          model: cfModel,
-          messages: simplifiedMessages
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
       if (res.ok) {
         currentChatIndex = (index + 1) % CHAT_WORKER_URLS.length;
-        return { stream: res.body!, provider: "Cloudflare", model: cfModel };
+        return { stream: res.body!, provider: "Cloudflare (w/ tools)", model: cfModel };
       }
     } catch (err: any) {
     }
@@ -867,17 +899,58 @@ async function callChatWorkers(
 }
 
 // ============================================================
-// ANTHROPIC DIRECT
+// ANTHROPIC DIRECT WITH MCP SUPPORT
 // ============================================================
+
+async function getMCPServers(request?: Request): Promise<any[]> {
+  const mcpServers: any[] = [];
+  
+  // Build MCP server URLs from configured connectors
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+  
+  // GitHub MCP Server
+  mcpServers.push({
+    type: "url",
+    url: `${baseUrl}/api/mcp/github`,
+    name: "github-mcp",
+  });
+  
+  // You can add more MCP servers here:
+  // Slack, Linear, Notion, Google Drive, Vercel, etc.
+  // Example:
+  // mcpServers.push({
+  //   type: "url",
+  //   url: `${baseUrl}/api/mcp/slack`,
+  //   name: "slack-mcp",
+  // });
+  
+  return mcpServers;
+}
+
 async function callAnthropic(
   messages: any[],
   model: string,
-  apiKey: string
+  apiKey: string,
+  request?: Request
 ): Promise<{ stream: ReadableStream; provider: string; model: string }> {
   const anthropicModel = model.startsWith("claude-") ? model : "claude-3-5-sonnet-20241022";
 
-
   try {
+    // Get configured MCP servers
+    const mcpServers = await getMCPServers(request);
+    
+    const requestBody: any = {
+      model: anthropicModel,
+      max_tokens: 4096,
+      stream: true,
+      messages,
+    };
+    
+    // Add MCP servers if available
+    if (mcpServers.length > 0) {
+      requestBody.mcp_servers = mcpServers;
+    }
+
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -885,12 +958,7 @@ async function callAnthropic(
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: anthropicModel,
-        max_tokens: 4096,
-        stream: true,
-        messages,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!res.ok) {
@@ -898,7 +966,7 @@ async function callAnthropic(
       throw new Error(`Anthropic failed (${res.status}): ${errText.slice(0, 200)}`);
     }
 
-    return { stream: res.body!, provider: "Anthropic", model: anthropicModel };
+    return { stream: res.body!, provider: "Anthropic (with MCP)", model: anthropicModel };
   } catch (err: any) {
     throw err;
   }
@@ -1238,7 +1306,7 @@ After tool results come back: 1-2 line summary + the returned URL/value. No fill
           result = await callChatWorkers({ task: "chat", messages: messagesWithSystem }, "@cf/a-lab/gpt-oss-120b");
         }
       } else if (finalProvider === "anthropic" && anthropicApiKey) {
-        result = await callAnthropic(apiMessages, finalModel, anthropicApiKey);
+        result = await callAnthropic(apiMessages, finalModel, anthropicApiKey, req);
         isAnthropic = true;
       } else if (finalProvider === "groq" || GROQ_CHAT_MODELS[finalModel]) {
         result = await callGroq(messagesWithSystem, finalModel, hasImage);
