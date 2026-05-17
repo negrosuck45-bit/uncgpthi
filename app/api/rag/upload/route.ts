@@ -1,11 +1,20 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import pdfParse from "pdf-parse";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+// Simple PDF text extraction without external deps
+function extractTextFromPDF(data: Uint8Array): string {
+  try {
+    const text = new TextDecoder().decode(data);
+    return text.replace(/[^\x20-\x7E\n]/g, " ");
+  } catch {
+    return "";
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,9 +26,14 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "Missing file or projectId" }, { status: 400 });
     }
 
-    const buffer = await file.arrayBuffer();
-    const pdf = await pdfParse(Buffer.from(buffer));
-    const text = pdf.text;
+    let text = "";
+    
+    if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+      const arrayBuffer = await file.arrayBuffer();
+      text = extractTextFromPDF(new Uint8Array(arrayBuffer));
+    } else {
+      text = await file.text();
+    }
 
     // Get embeddings from HuggingFace
     const hfApiKey = process.env.HF_API_KEY;
